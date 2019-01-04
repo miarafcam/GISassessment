@@ -1,0 +1,816 @@
+---
+title: "GIS Final Assessment Report"
+author: "Mia Rafalowicz-Campbell"
+date: "04/01/2019"
+output: pdf_document
+urlcolor: blue
+bibliography: GIS.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=60), tidy=TRUE)
+```
+
+# Part 1 - Mapping and Cartography
+
+## Mapping Public Transport Access in London
+
+In London, transport accessibility (or connectivity) is measured by Public Transport Access Level (PTAL) [@tfl-assessing]. The calculation of PTAL makes several assumptions, notably that people will walk up to 960m (~12 minutes) to a rail/tube service, or 640m (~8 minutes) to a bus service [@tfl-assessing, p. 18]. While PTAL is used primarily in planning contexts, it would be interesting to map the areas around rail, tube and bus stops to visualise how much of London is and isn't covered by these catchments, overlaid on the population density at LSOA level to give an idea of the areas which are/aren't served well by public transport, and the scale of the population that is affected.
+
+## Mapping rail and tube stations in R
+
+The tube, rail and tram stations are mapped in R. The following packages are used.
+
+```{r packages, message=FALSE}
+
+library(sp)
+library(rgdal)
+library(rgeos)
+library(tmap)
+library(RColorBrewer)
+library(qdap)
+library(formatR)
+```
+
+The data required for this map includes the locations of the stations, downloaded from Doogal, the LSOA data (including population density, i.e. persons per hectare), and a shapefile of the LSOA boundaries, downloaded from London Datastore. 
+
+```{r 1-data, message=FALSE, results='hide'}
+
+London_stations <- read.csv("./part1/London stations.csv")
+London_stations_mappable <- SpatialPointsDataFrame(London_stations[,2:3],
+                                                 London_stations,
+                                                 proj4string = CRS("+init=EPSG:27700"))
+
+LSOAs <- readOGR("./part1/LSOA_2011_London_gen_MHW.shp")
+LSOAs <- spTransform(LSOAs, CRS("+init=EPSG:27700"))
+
+LSOAdata <- read.csv("./part1/lsoa-data-refined.csv")
+
+LSOAdata_map <- merge(LSOAs, LSOAdata, by.x="LSOA11CD", by.y="LSOA")
+```
+
+A buffer of 960m is created around each of the stations, and these buffers are joined up.
+
+```{r 1-buffer}
+
+# stations with 960m buffers over boroughs
+station_buffers <- gBuffer(London_stations_mappable, width = 960, byid=TRUE)
+buffer_polygons <- gUnaryUnion(station_buffers)
+```
+
+A map is created using tmap, which offers a "coherent plotting system" for layer-based thematic maps [@tennekes]. The LSOA boundary layer is shaded using population density data; the stations are then plotted as dots, with their buffer as the final layer. A legend is built, with manual components added to summarise the station and buffer components. 
+
+```{r 1-map}
+
+# map stations and buffers over pop density
+
+tm_shape(LSOAdata_map) +
+  tm_fill("Persons.per.hectare.2013", 
+          palette ="Oranges", 
+          title = "Persons per hectare", 
+          style = "quantile", alpha = 0.5) + 
+  tm_borders(col="grey", lwd = 0.1) +
+  tm_shape(London_stations_mappable) + 
+  tm_dots(col = "green", size = 0.03, title = "Station") +
+  tm_shape(buffer_polygons) +
+  tm_borders(col="navyblue") +
+  tm_compass(position = c("right", "top"), size = 1.3) +
+  tm_layout(frame = FALSE, 
+            legend.outside = TRUE, 
+            legend.title.size = 0.9, 
+            legend.position = c("right", "bottom"), 
+            main.title = "London station walkability over population density", 
+            main.title.size = 1.1) +
+  tm_add_legend(type = "symbol", 
+                labels = "   Tube, rail or tram station",
+                col = "green", size = 0.15, shape = 1, 
+                title = "", is.portrait = TRUE, z = NA) +
+  tm_add_legend(type = "line", 
+                labels = "12 minute walk catchment",
+                col = "navyblue", lwd = 1, title = "", 
+                is.portrait = TRUE, z = NA)
+
+```
+
+The map shows that the majority of areas that don’t fall within the 960m buffer have a lower population density, however there are some areas (particularly in the western and eastern edges of the map) where this isn’t the case, and some parts in the central northeast with many tube stations that appears to have a lower population density. 
+
+The map as presented is quite busy, and at this scale it can be difficult to tease out some of the detail. Viewing the map in tmap’s ‘view mode’ allows for zooming in and lends itself better to this type of map. 
+
+## Mapping bus stops in QGIS
+
+A similar map is created in QGIS using bus stops, shown in figure 1. 
+
+QGIS is chosen as it is an open-source application that does not require a license, which is often a greater consideration than specific functionalities (within reason) [@friedrich, p. 104]. 
+
+The same LSOA shapefile with population density data is added, and the density is shaded using quantile breaks. The bus stop data is downloaded as a shapefile from London Datastore. The buffer layer is created using the Buffer processing tool, inputting the 640m distance and 'dissolving result' in order to join the buffer boundaries. 
+
+The Print Composer is used to create the final map, including adding a zoomed-in inset of part of the map, and a legend.
+
+```{r 1-qgis, echo=FALSE, fig.cap="QGIS map", out.width = '100%'}
+knitr::include_graphics("./part1/GISpt1_qgismap1.png")
+```
+
+The map is busy, which is to be expected given the large number of bus stops in London, and again could be more effective on a smaller scale, as evidenced by the more informative map inset. At this scale, it appears that bus route coverage is very good in London.
+
+Of course, a sensitivity in both maps is the use of population density data at LSOA level: this could look quite different with the data at, for example, Borough-level or OA-level. This is the Modifiable Unit Area Problem, and is present whenever data is aggregated into areas [@monmonier, pp. 124-129]. 
+
+## Process comparison
+
+The key difference between command-line and GUI GIS methods is the difference in the process of building the map. Using R for these maps was a slower process that required fixing errors with code before being able to visualise data. Using QGIS on the other hand allowed a very quick visualisation of the data and analysis, which was in part more intuitive given my limited GIS experience. I would say, however, that because a GUI needs to display all possible options, the software seems a little over-complicated and it can be hard to cut through the noise, whereas with R you simply call on the functionality that you require. R is also extremely flexible, offering a great number of ways to achieve desired results through packages and an active online community [@renard]. 
+
+\pagebreak
+
+# Part 2 - Spatial Analysis Methodologies
+
+As detailed above, I am working in R to conduct the spatial analysis, thanks to its simplicity of setup, flexiblity, and supportive online community.
+
+## Q1
+
+As I did not complete the treasure hunt myself, I read in last year's Team 7 hunt route trace. 
+
+```{r 2-q1_packages_data, message=FALSE}
+
+library(sf)
+library(tmap)
+library(geojsonio)
+library(gdistance)
+
+hunt <- geojson_read("https://www.dropbox.com/s/wa2ip35tcmt93g3/Team7.geojson?raw=1", what = "sp")
+
+UKBNG <- "+init=epsg:27700"
+latlong <- "+init=epsg:4326"
+
+```
+
+This is converted to an Simple Features (sf) object, and a BNG version is also stored. sf is chosen over Spatial Data (sp) for its simplicity and wide adoption. 
+
+```{r 2-q1_sf}
+# sp to sf
+hunt <- st_as_sf(hunt)
+
+#BNG projection
+huntBNG <- st_transform(hunt, UKBNG)
+```
+
+*st_length* is used to calculate the length of the entire trace. Try projections in both BNG and latlong. 
+
+```{r 2-q1_length, results='hide'}
+
+st_length(hunt)
+st_length(huntBNG)
+
+```
+
+
+The latlong route length is 46,610.68m and the BNG route length is 46,603.95m.
+
+## Q2
+
+The tfl station data is read in from Doogal, and is converted to an sf object.
+
+```{r 2-q2_packages_data, message=FALSE, results='hide'}
+
+library(rgdal)
+library(tidyverse)
+library(rgeos)
+
+tubestations <- readOGR("https://www.doogal.co.uk/LondonStationsKML.ashx", "London stations with zone information")
+
+```
+
+```{r 2-q2_sf}
+
+#convert sp to sf
+tubestations@bbox <- tubestations@bbox[-c(3), ]
+tubestationsSF <- st_as_sf(tubestations, coords = c("coords.x1", "coords.x2"), crs = latlong)
+
+```
+
+A 100m buffer is created around the hunt route. This is plotted to estimate the final answer.
+
+```{r 2-q2_buffer}
+
+#create 100m buffer around the hunt route
+buffer_100m <- st_buffer(huntBNG, 100)
+```
+
+```{r 2-100mbufferplot, fig.width=3, fig.height=3}
+
+#plot to check
+tm_shape(huntBNG) +
+  tm_lines(col = "green", lwd = 4) +
+  tm_shape(buffer_100m) + 
+  tm_borders(col="navyblue") + 
+  tm_shape(tubestations) + 
+  tm_dots(col = "red", size = 0.02)
+```
+
+*st_intersects* is used to identify the points (tube stations) that intersect with the buffer polygon. 
+
+```{r 2-q2_intersect, message=FALSE}
+#intersection of buffer and stations
+buffer_100m <- st_transform(buffer_100m, latlong)
+tube_100m_intersection <- st_intersects(buffer_100m,tubestationsSF)
+```
+
+$`r lengths(tube_100m_intersection)`$ stations are passed within 100m of the route.
+
+## Q3
+
+The provided hunt addresses data is read in. The Platform 9 3/4 in King's Cross has been erroneously geocded in San Francisco, which is manually corrected.
+
+```{r 2-q3_data}
+huntaddresses <- 
+  read.csv("https://www.dropbox.com/s/2cbu2ux9ddy9c0l/huntaddresses.csv?raw=1")
+
+#correcting for platform 9.75 address
+huntaddresses$GoogleAddress <- as.character(huntaddresses$GoogleAddress)
+huntaddresses[29,5] <- 
+  as.character("King's Cross, Pancras Rd, Kings Cross, London N1 9AP, UK")
+huntaddresses[29,3] <- 51.5321845
+huntaddresses[29,4] <- -0.12392169999998259
+
+huntaddressesSF <- st_as_sf(huntaddresses, coords = c("lon", "lat"), crs = latlong, agr = "constant")
+huntaddressesSF <- st_transform(huntaddressesSF, 27700)
+
+```
+
+A 300m buffer is created around the route, and plotted to check expected results. This is simpler than creating 300m buffers around each of the landmarks.
+
+```{r 2-q3_buffer}
+#300m buffer around route
+buffer_300m <- st_buffer(huntBNG, 300)
+buffer_300m <- st_transform(buffer_300m, 27700)
+```
+
+```{r 2-300mbufferplot, fig.width=3, fig.height=2}
+tm_shape(huntBNG) +
+  tm_lines(col = "green", lwd = 4) +
+  tm_shape(huntaddressesSF) + 
+  tm_dots(col = "black", size = 0.03) +
+  tm_shape(buffer_300m) + tm_borders(col="navyblue")
+```
+
+An object is created that contains all the landmarks that intersect with the 300m buffer polygon of the route. 
+
+```{r 2-q3_landmarksreached, results='hide'}
+
+landmarks_reached <- sf::st_join(buffer_300m, huntaddressesSF, join = st_intersects)
+
+sum(landmarks_reached$Points)
+
+```
+
+The sum of the points for those landmarks is calculated: Team 7 scored 62 points.
+
+## Q4
+
+In order to use the ward data, the City of London is merged into one ward to match the data.
+
+```{r 2-q4_cityoflondon, message=FALSE, results='hide'}
+
+LondonWards <- readOGR("./part2/LondonWardsBoundaries/LondonWardsNew.shp")
+LondonWardsSF <- st_as_sf(LondonWards)
+
+#cut the city out
+city <- LondonWardsSF[1:25,]
+city$agg  <- 1
+
+#merge all of the boundaries together into single object
+cityagg <- city %>% group_by(city$agg) %>% summarise()
+
+#disolve the ward boundaries and leave the first one as city of London
+#aggregate all the ones where  the geometry matches cityagg
+LondonWards_dis <- aggregate(LondonWardsSF, by = cityagg, FUN = first)
+
+#merge them into a new object
+LondonWards_new <- rbind(LondonWards_dis, LondonWardsSF[26:649,])
+
+#convert columns to characters
+LondonWards_new$WD11CD <- as.character(LondonWards_new$WD11CD)
+LondonWards_new$WD11CDO <- as.character(LondonWards_new$WD11CDO)
+LondonWards_new$WD11NM <- as.character(LondonWards_new$WD11NM)
+
+#update the codes for the City of London 
+LondonWards_new[1,2] <- as.character("E09000001")
+LondonWards_new[1,3] <- as.character("00AA")
+LondonWards_new[1,4] <- as.character("City of London")
+
+```
+
+The ward boundaries are then merged with the ward data, including life expectancies.
+
+```{r 2-q4_datamerge, message=FALSE, results='hide'}
+
+LondonWardsData <- readOGR("./part2/LondonWardsData/LondonWards.shp")
+
+LondonWardsDataFrame <- LondonWardsData@data
+
+LWmerge <- merge(LondonWardsDataFrame, LondonWards_new, by = "WD11CD")
+LWmerge <- st_as_sf(LWmerge)
+LWmerge <- st_transform(LWmerge, UKBNG)
+
+```
+
+The wards entered are identified as the intersection of the hunt route and the London Wards, storing these in a new object.
+
+```{r 2-q4_wardsentered}
+
+wards_entered <- sf::st_join(huntBNG, LWmerge, join = st_intersects)
+```
+
+The data is sorted by male life expectancy, and minimum and maximum values are identified by looking at the head and tail of the data. 
+
+```{r 2-q4_MLE, results= 'hide'}
+
+MLEsort <- arrange(wards_entered, MaleLE0509)
+
+head(MLEsort)
+tail(MLEsort)
+```
+
+Minimum is Bethnal Green South with 74.8; maximum is City of London with 82.8.
+
+## Q5
+
+Using the object with the wards entered, the mean of both male and female life expectancies is taken. The average of these yields the combined average life expectancy across all wards entered.
+
+```{r 2-q5, results='hide'}
+
+summary(wards_entered)
+
+mean(wards_entered$MaleLE0509)
+mean(wards_entered$FemaleLE05)
+
+mean(mean(wards_entered$MaleLE0509) + mean(wards_entered$FemaleLE05))
+
+```
+
+The life expectancy average across wards is 77.98 for males, 83.56 for females, and 80.77 combined. A more accurate way to calculate this would be to create a proportional combined average using relative size of male and female populations in these wards. 
+
+## Q6
+
+To identify any spatial patterns of the hunt landmarks, point pattern analysis is carried out. The following packages are used.
+
+```{r 2-q6_packages, message=FALSE}
+
+library(spatstat)
+library(sp)
+library(maptools)
+library(GISTools)
+library(tmaptools)
+library(raster)
+library(fpc)
+library(OpenStreetMap)
+library(ggplot2)
+library(plyr)
+
+```
+
+A window for the analysis is set (all of London), and a ppp object of the landmarks is created for use with the spatstat package. This is plotted for verification.
+
+```{r 2-q6_ppp}
+
+#set window for analysis
+window <- as.owin(LondonWardsData)
+
+#convert to sp in order to convert to ppp
+huntcoords <- huntaddresses[,c(4,3)]
+huntaddressesSP <- SpatialPointsDataFrame(coords = huntcoords, data = huntaddresses, proj4string = CRS(latlong))
+huntaddressesSP_BNG <- spTransform(huntaddressesSP, UKBNG)
+
+# create a ppp object
+huntaddressesSP.ppp <- ppp(x=huntaddressesSP_BNG@coords[,1],y=huntaddressesSP_BNG@coords[,2],window=window)
+
+plot(huntaddressesSP.ppp,pch=16,cex=0.5, main="test plot")
+
+```
+
+The points are tested using spatstat's chi-squared quadrat test. 
+
+```{r 2-q6_quadrat, warning=FALSE}
+
+#chisquare quadrat
+teststats <- quadrat.test(huntaddressesSP.ppp, nx = 4, ny = 4)
+teststats
+
+```
+
+The results show that with a p-value much lower than 0.05, the null hypothesis that there is no clustering cannot be rejected, and therefore there is not complete spatial randomness (CSR). 
+
+A Ripley's K analysis is conducted to give a bit more information about the clustering. 
+
+```{r 2-q6_ripleys}
+
+K <- Kest(huntaddressesSP.ppp, correction="best", rmax = 700)
+
+plot(K)
+
+```
+
+The red line shows the theoretical values of K for each distance window (r) for a Poisson assumption of CSR, whereas the black line is the estimated values of K; as the black line is entirely above the red, we can see that there is clustering at all distances, with this still increasing at 700m. 
+
+DBSCAN analysis is conducted to identify where the clustering is. An epsilon of 700m is tried, based on Ripley's K analysis, and a cluster is defined as 3 points. Larger epsilons are then also tried. The following analysis uses 1000m. 
+
+```{r 2-q6_dbscan, message=FALSE, results='hide'}
+
+#convert to BNG
+LondonWardsDataSP <- spTransform(LondonWardsData, UKBNG)
+
+#extract the points from the spatial points data frame
+HuntAddressesPoints <- data.frame(huntaddressesSP_BNG@coords[,1:2])
+
+#run the dbscan analysis
+db <- fpc::dbscan(HuntAddressesPoints, eps = 1000, MinPts = 3)
+
+#add the cluster membership info back into dataframe
+HuntAddressesPoints$cluster <- db$cluster
+
+#convex hull polygons
+chulls <- ddply(HuntAddressesPoints, .(cluster), function(df) df[chull(df$lon, df$lat), ])
+
+#0 is all points that aren't in a cluster- drop from dataframe
+chulls <- subset(chulls, cluster>=1)
+
+# basemap
+#get the bbox for ldn
+#crs(LondonWardsData)
+LondonWardsDataLL <- spTransform(LondonWardsData, latlong)
+#LondonWardsDataLL@bbox
+#min      max
+#x -0.5103751  0.3340155
+#y 51.2867602 51.6918741
+basemap<-openmap(c(51.2867602,-0.5103751),c(51.6918741,0.3340155), zoom=NULL,"stamen-toner")
+basemap_bng<-openproj(basemap, projection=UKBNG)
+
+#plot
+autoplot(basemap_bng) + geom_point(data=HuntAddressesPoints, aes(lon,lat, colour=cluster, fill=cluster)) + geom_polygon(data = chulls, aes(lon,lat, group=cluster, fill=cluster), alpha = 0.5)
+```
+
+The plot shows four clear clusters in central and North East London. We also see that there are no points in the outskirts of London and in effect there is one big cluster in central London, but this would not be picked up by our analysis. 
+
+\pagebreak
+
+# Part 3 - Mini Research Project 
+
+## Housing Association Partner Mapping Tool
+
+I have built an outline partner mapping tool for housing associations (HAs) to use in the search for organisations to merge with or acquire. Merging is a common practice in the sector [@vanBortel; @latch], and it requires consideration of a number of different factors, all of which are informed by data that comes from disparate sources and is often not easily available nor simple to cross-reference. This is particularly acute in an industry has a poor record of making the most of its data [@IH-data]. 
+
+There is no similar tool currently available, and the best tools for comparing housing association data are Housingnet and HousingExpert, which both charge a subscription fee. The vast majority of the data that they use is publicly available, and so part of the motivation for this tool is to produce something that will be open and free of charge.
+
+Key factors that influence merger considerations are geography of HA headquarters and housing stock, the extent of their operation (stock size), and financial indicators, such as turnover, gearing and interest cover, which provide indication of an HA’s available capacity to develop. Other factors (not covered here) are their regulatory judgements, strategic objectives, and development pipeline. A key issue facing the sector is that information about individual organisations comes from a variety of sources, and is often incomplete and inconsistent, meaning that it can be difficult to gather intelligence to make informed decisions.  
+
+The tool that I have built and will continue to develop allows HAs to narrow down their searches for appropriate potential partner organisations based on initial search criteria, namely geography of HA headquarters and housing stock size. The tool maps and visualises this data and also presents a table of relevant further data for the shortlist of organisations. 
+
+This is the first iteration of a tool that I will be able to use in my work at a consultancy focused on housing and not-for-profit sectors [@ct-merger]. The design of the tool is based on conversations I have had with a colleague who specialises in mergers and acquisitions in the social housing sector. 
+
+## Data 
+
+The following packages are used in the preparation of data for the tool.
+
+```{r 3-packages, message=FALSE}
+
+library(sf)
+library(plyr)
+library(dplyr)
+library(tmap)
+library(fuzzyjoin)
+library(scales)
+```
+
+The initial data required is a list of all HAs in England with their headquarters locations; a list was extracted from the website Housingnet, which includes postcodes, and saved as a csv for import into R. Geocoding by postcode is sufficient for these purposes as the relevant distances for this search are in the order of kilometres. 
+
+```{r 3-housingnet_data}
+
+# import data on HQs of all housing organisations (includes local authorities and other non-relevant orgs)
+housingorgsHQ <- read.csv("./part3/HNhousingorgs1218.csv")
+
+# remove local authorities and other irrelevant types
+unique(housingorgsHQ$Type)
+HAs <- housingorgsHQ %>% filter(Type %in% c("Charity","Letting","Letting/Hostel","Registered Provider (for profit)","Stock Transfer","Care & Support","Hostel"))
+  
+# keep only parent organisations
+HAs <- HAs %>% filter(Relationship %in% c("Parent"))
+  
+# keep only england
+HAs <- HAs %>% filter(Country %in% c("England"))
+
+```
+
+The ONS postcode directory is used to geocode these locations. The data frame is first converted to an sf object and tidied up. This join using postcodes takes several minutes as the cropped postcode directory is quite large, at just over 1 GB. 
+
+```{r 3-geocode}
+
+# import all postcode data
+ONSpostcodes <- read.csv("./part3/ONSPDcentroids.csv", stringsAsFactors = FALSE)
+
+# crop ONSpostcodes to just England
+unique(ONSpostcodes$ctry)
+# england is E92000001
+ONSpostcodes <- ONSpostcodes %>% filter(ctry == "E92000001")
+
+# geocoding
+# colnames(ONSpostcodes)
+# colnames(HAs)
+colnames(HAs)[11] <- "pcd"
+ONSpostcodes_crop <- ONSpostcodes[,c(4,45,46)]
+HAs_geocode <- join(HAs, ONSpostcodes_crop, by = "pcd", type = "left")
+
+# some returned NA - remove
+HAs_geocode2 <- HAs_geocode[!is.na(HAs_geocode$lat),]
+
+# convert to sf
+latlong <- "+init=epsg:4326"
+BNG <- "+init=epsg:27700"
+HAs_SF <- st_as_sf(HAs_geocode2, agr = NA_agr_,
+                coords = c("long", "lat"), crs = latlong, 
+         dim = "XY", remove = TRUE, na.fail = TRUE,
+         sf_column_name = NULL)
+
+# make group stock numeric
+is.numeric(HAs_SF$Group.Stock)
+HAs_SF$Group.Stock <- as.numeric(gsub(",", "", HAs_SF$Group.Stock))
+
+# remove unnecessary columns
+HAs_SF <- HAs_SF[,c(1:3,8:11,22,26,40:43)]
+
+# make group stock the variable determining the size of the dot
+tm_shape(HAs_SF) + 
+  tm_dots(col = "red", size = "Group.Stock") +
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
+  
+```
+
+The organisations are plotted to ensure they show expected results: this is confirmed, with the points appearing to be distributed across an England-type shape, and a cluster of larger organisations around London. 
+
+The financial data is then added. This comes from the Regulator of Social Housing's Global Accounts dataset, again tidied in Apple Numbers and saved as a csv for import into R. The 2018 dataset was recently published, including Value for Money (VfM) metrics which are very relevant for HA partner mapping as they include certain indicators regarding HAs’ financial health.  
+
+Unfortunately, the names of certain HAs are not consistent across the dataset, and the organisation codes do not appear in the initial dataset, so some scanning has to be done by eye to bring them into good shape for a (fuzzy) merge. 
+
+```{r 3-VfM}
+VfM <- read.csv("./part3/GA_VfM_2018_cons.csv")
+
+# formatting dataframes in order to merge
+
+stopwords <- c("Ltd.", "Ltd", "Limited", "The", "-")
+HAs_SF$Housing.Association.Name <- gsub("\\s*\\([^\\)]+\\)","",as.character(HAs_SF$Housing.Association.Name))
+HAs_SF$Housing.Association.Name <- gsub(paste0(stopwords,collapse = "|"),"", HAs_SF$Housing.Association.Name)
+HAs_SF$Housing.Association.Name <- gsub("&","and", as.character(HAs_SF$Housing.Association.Name))
+
+VfM$RP_Name <- gsub("\\s*\\([^\\)]+\\)","",as.character(VfM$RP_Name))
+VfM$RP_Name <- gsub(paste0(stopwords,collapse = "|"),"", VfM$RP_Name)
+VfM$RP_Name <- gsub("&","and",as.character(VfM$RP_Name))
+
+# rownames(HAs_SF)
+HAs_SF[240,1] <- as.character("London and Quadrant Housing Trust")
+HAs_SF[285,1] <- as.character("Moat Homes")
+VfM[145,2] <- as.character("Poplar HARCA")
+
+# merge
+
+colnames(HAs_SF)[1] <- "HAname"
+colnames(VfM)[2] <- "HAname"
+
+HAs_SF_VfM <- stringdist_left_join(HAs_SF,VfM, by="HAname")
+
+# better column names
+colnames(HAs_SF_VfM)[1] <- "HA.name"
+colnames(HAs_SF_VfM)[7] <- "Postcode"
+colnames(HAs_SF_VfM)[8] <- "Local.Authority"
+colnames(HAs_SF_VfM)[17] <- "Interest.cover"
+colnames(HAs_SF_VfM)[18] <- "Cost.per.unit"
+colnames(HAs_SF_VfM)[19] <- "Operating.margin.SHL"
+colnames(HAs_SF_VfM)[20] <- "Operating.margin.overall"
+colnames(HAs_SF_VfM)[21] <- "Turnover.social.housing"
+colnames(HAs_SF_VfM)[22] <- "Turnover.overall"
+colnames(HAs_SF_VfM)[23] <- "Stock.concentration"
+
+# readjust data and format as £
+HAs_SF_VfM$Cost.per.unit <- ifelse(is.na(HAs_SF_VfM$Cost.per.unit),
+                                   NA,
+                                   dollar_format(suffix = "", prefix = "£")(HAs_SF_VfM$Cost.per.unit*1000))
+
+HAs_SF_VfM$Turnover.social.housing <- ifelse(is.na(HAs_SF_VfM$Turnover.social.housing),
+                                             NA,
+                                             dollar_format(suffix = "", prefix = "£")(HAs_SF_VfM$Turnover.social.housing*1000))
+
+HAs_SF_VfM$Turnover.overall <- ifelse(is.na(HAs_SF_VfM$Turnover.overall),
+                                      NA,
+                                      dollar_format(suffix = "", prefix = "£")(HAs_SF_VfM$Turnover.overall*1000))
+
+# round numeric cols to 3dp
+HAs_SF_VfM <- HAs_SF_VfM %>% mutate_if(is.numeric, round, 3)
+
+# remove unnecessary columns
+#colnames(HAs_SF_VfM)
+HAs_SF_VfM <- HAs_SF_VfM[,-c(3,9,10,11,14)]
+
+# save to use within the shiny app
+saveRDS(HAs_SF_VfM, "HAs_forapp.rds")
+
+```
+
+This is the final dataset to be used in the tool, which is saved as an rds file for ease of use in the Shiny app, which runs in its own environment.
+
+## HA Finder tool
+
+The tool is built as a Shiny web app in order to be easily accessible and shareable; reacting to user input and producing the desired outputs without requiring the user to install or run any specialist software.  
+
+The app itself is a tool that can help a specific HA to find potential merger partner HAs with a search based on distance, and filtering by stock size.  
+
+### Helper functions
+
+The following functions are written to be called from within the app via a ‘helper’ R script (*HAhelpers.R*) in order to keep the app file lean. 
+
+```{r 3-helper_functions, eval= FALSE}
+
+distanceHA <- function(HA, listHAs){
+  
+  HA <- st_transform(HA, 4326)
+  listHAs <- st_transform(listHAs, 4326)
+  HAs_SF$distance.m <- st_distance(listHAs, HA, by_element = FALSE,
+                                      which = "distance", par = 0, tolerance = 0)
+  HAs_SF$distance.m <<- as.vector(format(round(HAs_SF$distance.m, 2), nsmall = 2))
+  
+}
+
+buffer <- function(HA, listHAs, range, org){
+  HA <- st_transform(HA, 27700)
+  listHAs <- st_transform(listHAs, 27700)
+  buffer_maxdist <- st_buffer(HA, range)
+  HAs_intersect <- sf::st_join(buffer_maxdist, listHAs, join = st_intersects)
+  HAs_intersect2 <- listHAs[(HAs_intersect),]
+  HAs_intersect3 <<- HAs_intersect2 %>% filter(HA.name != org)
+}
+
+stock <- function(listHAs, max, min){
+  HAs_final <<- dplyr::filter(listHAs, max >= Group.Stock & Group.Stock >= min)
+}
+
+```
+
+The *distanceHA* function calculates the distance between the HA org that was selected at input (*myHA*) and all other organisations in the list, which is used as part of the buffer function below. It also stores these distances as an additional variable, which will be displayed as an output in their own right, as this is of key relevance to the HA seeking merger partners.  
+
+The *buffer* function is used to filter the organisations. The input requires the user to set the search radius, which is then inputted into the buffer function which creates a list of organisations that fall inside (intersect with) that buffer. The function then saves this list (*HAs_intersect3*) for use in the following function, which is the last step in the HA filtering. 
+
+The *stock* function uses the inputted minimum and maximum stock values to filter the list of HAs to leave only those organisations whose housing stock falls between these limits. The final list (*HAs_final*) is then saved via 'superassignment' for use in the app output. 
+
+### Shiny app
+
+The code for the app, which has also been uploaded separately, is viewable below. The tool itself can be accessed here: https://miarafcam.shinyapps.io/HAfinder/
+
+```{r 3-shinyapp, eval= FALSE}
+
+#
+# This is a Shiny web application. 
+#
+
+library(shiny)
+library(leaflet)
+library(tmap)
+library(dplyr)
+library(plyr)
+library(sf)
+library(DT)
+library(RColorBrewer)
+library(tmaptools)
+
+source("HAhelpers.R")
+
+HAs_SF <<- readRDS("HAs_forapp.rds")
+
+# Define UI for application that draws a histogram
+ui <- fluidPage(
+   
+   # Application title
+   titlePanel("HA partner mapping"),
+   
+   # Sidebar for setting parameters
+   sidebarLayout(
+     
+     sidebarPanel(h3("Set your parameters"),
+                  selectInput("myorg",
+                              "Your organisation",
+                              choices = HAs_SF$HA.name),
+                  numericInput("distance_km", 
+                               "Search distance (km)",
+                               #remember to multiply by 1000 when using this later
+                               value = 50),
+                  sliderInput("min_stock", "Minimum stock",
+                              min = 0, max = 50000, value = 1000),
+                  sliderInput("max_stock", "Maximum stock",
+                              min = 5000, max = 200000, value = 40000),
+                  actionButton("search","Search")
+     ),
+     
+     # Map various partners and show data
+     mainPanel(h2("Potential partners"),
+               tabsetPanel(
+                 tabPanel("Map", leafletOutput("partner_map"),
+                          textOutput("errormessage")), 
+                 tabPanel("Table", dataTableOutput("HAstats"))
+               )
+      )
+   )
+)
+
+# Define server logic required to plot map
+server <- function(input, output) {
+  
+  observeEvent(input$search, {
+    
+    myHA <- HAs_SF %>% filter(HA.name == input$myorg)
+    
+    distanceHA(myHA, HAs_SF)
+    
+    buffer(myHA, HAs_SF, (input$distance_km)*1000, input$myorg)
+    
+    stock(HAs_intersect3, input$max_stock, input$min_stock)
+    
+  output$partner_map <- renderLeaflet({
+    if ((dim(HAs_final)[1] != 0)) {
+      
+    map <- tm_shape(myHA) +
+      tm_dots(col="blue", text = "HA.name", size = 0.05, alpha = 0.8) +
+      tm_shape(HAs_final) + 
+      tm_dots(col="Group.Stock", palette="Reds", size = "Group.Stock", 
+              text = "HA.name", alpha = 0.7)
+    
+    tmap_leaflet(map) %>% 
+      addProviderTiles(providers$CartoDB.Positron) %>%
+      addLegend("bottomright", 
+                colors = "blue", 
+                labels = "your HA",
+                opacity = 0.6)
+    }
+    })
+ 
+  output$errormessage <- renderText({
+    if ((dim(HAs_final)[1] == 0)) {
+      paste("Your search has returned 0 organisations. Please alter the parameters.")
+    }
+  })
+  
+  output$HAstats <- renderDataTable({
+    HAs_final
+    }, 
+      options=list(columnDefs = list(list(visible=FALSE, targets=c(0,2,4:6,9,13,14,19))))
+      )
+   
+  })
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+A number of packages are run at the start, the source file with the helper functions (*HAhelpers.R*) is called, and the RDS file with the geocoded HAs as an sf object is read in. 
+
+The UI inlcudes an area for the user to set their search parameters (their own HA, the search radius, and the minimum/maximum housing stock), as well as an output area with a map of organisations and a data table. Screenshots of the tool UI are shown in figures 2, 3 and 4. 
+
+The server logic uses the inputs to run the relevant functions and store *myHA*, which is the user's own organisation (this needs to be isolated, highlighted on the map, and removed from the data table).  
+
+The output is a tmap leaflet object with the target HAs (as well as the user's own HA) visualised on a map, with stock sized represented by colour and size of the dots. Switching to the next tab shows a table with relevant data for each of the HAs on the list, including information regarding stock, finances, and location. 
+
+An error message has also been designed to appear in the event that the input parameters return an empty list.
+
+
+```{r 3-ui_input, echo=FALSE, fig.cap="Input parameters", out.width = '40%'}
+knitr::include_graphics("./part3/HAfinder-input.png")
+
+```
+
+```{r 3-ui_map, echo=FALSE, fig.cap="Output map", out.width = '75%'}
+knitr::include_graphics("./part3/HAfinder-map.png")
+
+```
+
+```{r 3-ui_table, echo=FALSE, fig.cap="Output table", out.width = '75%'}
+knitr::include_graphics("./part3/HAfinder-table.png")
+
+```
+
+
+## Discussion 
+
+The HA partner mapping Shiny app is currently a simple tool that will help HAs and their consultants to make informed decisions in HA partner mapping exercises. There are, however, a few issues in the current running of the tool. These mainly relate to the initial data-sourcing and merging stage.  
+
+The initial import and cleaning found 806 housing organisations in England that are parents (rather than subsidiaries) and therefore of possible interest to other HAs seeking a merger. However the geocoding using the ONS postcode directory yielded a list of only 457 organisations, meaning that just under half were not successfully geocoded. It would be essential to investigate and fix this in order for the tool to be of most value. I am confident however that it would be possible to do this with a little more time.  
+
+The second issue is derived from the merge with the regulator's value for money metrics. There were `r sum(is.na(HAs_SF_VfM$RP_Code))` orgs from the 457 HAs that didn't merge with any data from the regulator's list. Having inspected this, I surmise that the majority of this is due to the orgs not being on the regulator's list, rather than the fuzzy matching not working well (however this may still be playing a small part). The main problem is that the regulator only provides its data for organisations with a stock size of 1000 and over. The good news for this tool however, is that it's quite unlikely that HAs seek merger partners with a stock of below 1000 units, so this is of lower importance. Another reason the organisations do not appear on the regulator’s list is due to the *type* of organisation. Many on the list are charities that may not be regulated in the same way and are not recorded here. This may in turn also mean that they should not be included as part of the tool. Therefore, more work needs to be done to ensure only the relevant organisations are included in this tool, and that the data is more complete, perhaps looking for other sources to provide some of the financial data.  
+As it is also an aim for this tool to use only publicly available data and be free of charge, I will also seek to replace the initial import of postcodes from Housingnet to a public source.
+
+The output of the tool is simple and clearly shows the user the relative stock sizes of the included organisations. However, these are indeed sized relatively, meaning that an organisation's stock size could be visualised quite differently depending on the parameters set. This is 'deliberately misleading' [@monmonier, pp. 49-51], however it is worth considering futher whether this is desired. 
+
+## Conclusions 
+
+The above caveats withstanding, this tool is a useful way to quickly narrow searches for partner mapping, and would be used by myself and my colleagues in our work as consultants for housing associations. The visualisation of the data is far beyond anything we currently conduct and the automation of processes would certainly streamline our work.  
+
+With a bit more time to improve the data input and merging, this tool could be instrumental to our work. Next steps would be to add other data in the output (such as regulatory judgements) as well as to use the Land Registry's Commercial and Corporate Ownership dataset to create stock maps for each housing organisation. Work on this is underway.
+
+\pagebreak
+
+# References
+
